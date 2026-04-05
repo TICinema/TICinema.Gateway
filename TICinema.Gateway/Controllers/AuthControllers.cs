@@ -1,106 +1,85 @@
-﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity.Data;
-using Microsoft.AspNetCore.Mvc;
-using System;
+﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.WebUtilities;
+using System.Text;
+using System.Text.Json;
 using TICinema.Contracts.Protos.Identity; // Твои gRPC контракты
 using TICinema.Gateway.DTOs;
+using TICinema.Gateway.Extensions;
+using TICinema.Gateway.Interfaces;
+using static TICinema.Gateway.DTOs.TelegramDto;
 
 namespace TICinema.Gateway.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController : ControllerBase
+public class AuthController(IIdentityService identityService) : ControllerBase
 {
-    private readonly AuthService.AuthServiceClient _grpcClient;
-
-    public AuthController(AuthService.AuthServiceClient grpcClient)
-    {
-        _grpcClient = grpcClient;
-    }
-
     [HttpPost("send-otp")]
     public async Task<IActionResult> SendOtp([FromBody] SendOtpRequestDto dto)
-    {
-        // 1. Формируем gRPC запрос
-        var grpcRequest = new SendOtpRequest
-        {
-            Identifier = dto.Identifier,
-            Type = dto.Type
-        };
-
-        // 2. Вызываем Identity Service
-        // Если будет ошибка, Middleware её поймает, try-catch не нужен
-        var response = await _grpcClient.SendOtpAsync(grpcRequest);
-
-        return Ok(response);
-    }
+        => Ok(await identityService.SendOtpAsync(dto));
 
     [HttpPost("verify-otp")]
     public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtpRequestDto dto)
     {
-        var grpcRequest = new VerifyOtpRequest
-        {
-            Identifier = dto.Identifier,
-            Type = dto.Type,
-            Code = dto.Code
-        };
-
-        var response = await _grpcClient.VerifyOtpAsync(grpcRequest);
-
-        // 3. Настраиваем Cookie для Refresh Token
-        var cookieOptions = new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true, // Важно: в продакшене только HTTPS
-            SameSite = SameSiteMode.Strict,
-            Expires = DateTime.UtcNow.AddDays(7)
-        };
-
-        // Используем свойство Response контроллера
-        Response.Cookies.Append("refreshToken", response.RefreshToken, cookieOptions);
-
-        // 4. Возвращаем только AccessToken
-        return Ok(new { accessToken = response.AccessToken });
-    }
-
-    [HttpPost("logout")]
-    public IActionResult Logout()
-    {
-        Response.Cookies.Delete("refreshToken");
-        return Ok(new { message = "Вышли из системы" });
+        var result = await identityService.VerifyOtpAsync(dto);
+        Response.SetRefreshTokenCookie(result.RefreshToken);
+        return Ok(new { accessToken = result.AccessToken });
     }
 
     [HttpPost("refresh")]
     public async Task<IActionResult> Refresh()
     {
-        // 1. Пытаемся достать рефреш-токен из куки
-        if (!Request.Cookies.TryGetValue("refreshToken", out var refreshToken))
-        {
-            return Unauthorized(new { message = "Refresh token не найден" });
-        }
+        if (!Request.Cookies.TryGetValue("refreshToken", out var token))
+            return Unauthorized();
 
-        // 2. Делаем запрос в Identity Service
-        var response = await _grpcClient.RefreshAsync(new Contracts.Protos.Identity.RefreshRequest { RefreshToken = refreshToken });
-
-        // 3. Обновляем куку
-        var cookieOptions = new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = true,
-            SameSite = SameSiteMode.Strict,
-            Expires = DateTime.UtcNow.AddDays(7)
-        };
-        Response.Cookies.Append("refreshToken", response.RefreshToken, cookieOptions);
-
-        // 4. Возвращаем новый Access Token
-        return Ok(new { accessToken = response.AccessToken });
+        var result = await identityService.RefreshAsync(token);
+        Response.SetRefreshTokenCookie(result.RefreshToken);
+        return Ok(new { accessToken = result.AccessToken });
     }
 
-    [HttpGet("me")]
-    [Authorize(Roles = "Admin")]
-    public async Task<IActionResult> GetAccount()
+    [HttpPost("logout")]
+    public IActionResult Logout()
     {
-        var userId = HttpContext.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        return await Task.FromResult(Ok(new { Message = $"Привет, твой ID: {userId}" }));
+        Response.DeleteRefreshTokenCookie();
+        return Ok(new { message = "Вышли" });
+    }
+
+    [HttpGet("telegram")]
+    public async Task<IActionResult> InitTelegram()
+        => Ok(new { url = await identityService.GetTelegramAuthUrlAsync() });
+
+    [HttpPost("telegram/verify")]
+    public async Task<IActionResult> TelegramVerify([FromBody] TelegramVerifyRequestDto dto)
+    {
+        var result = await identityService.TelegramVerifyAsync(dto);
+
+        // Случай 1: Нам вернули URL для бота (нужна доп. регистрация)
+        if (result.ResultCase == TelegramVerifyResponse.ResultOneofCase.Url)
+        {
+            return Ok(new { url = result.Url });
+        }
+
+        // Случай 2: Пользователь сразу залогинился (токены на месте)
+        if (!string.IsNullOrEmpty(result.AccessToken) && !string.IsNullOrEmpty(result.RefreshToken))
+        {
+            // Работа с куками остается в контроллере, так как это часть HTTP-слоя
+            Response.SetRefreshTokenCookie(result.RefreshToken);
+            return Ok(new { accessToken = result.AccessToken });
+        }
+
+        return BadRequest("Ошибка авторизации: неверные данные или истекшая сессия");
+    }
+
+    [HttpPost("telegram/finalize")]
+    public async Task<IActionResult> FinalizeTelegram(TelegramFinalizeRequestDto dto)
+    {
+        var tokens = await identityService.TelegramConsumeAsync(new TelegramConsumeRequest()
+        {
+            SessionId = dto.SessionId,
+        });
+        
+        Response.SetRefreshTokenCookie(tokens.RefreshToken);
+        
+        return Ok(new { accessToken = tokens.AccessToken });
     }
 }

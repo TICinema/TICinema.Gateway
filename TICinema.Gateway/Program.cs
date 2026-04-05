@@ -4,19 +4,22 @@ using Scalar.AspNetCore;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using TICinema.Contracts.Protos.Identity;
+using TICinema.Gateway.Interfaces;
 using TICinema.Gateway.Middleware;
+using TICinema.Gateway.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
+builder.Services.AddScoped<IIdentityService, IdentityService>();
+
 builder.Services.AddGrpcClient<AuthService.AuthServiceClient>(o =>
 {
     o.Address = new Uri(builder.Configuration["ServiceUrls:Identity"]!);
 });
 
-// Регистрируем клиент для сервиса аккаунтов
 builder.Services.AddGrpcClient<AccountService.AccountServiceClient>(options =>
 {
     options.Address = new Uri(builder.Configuration["ServiceUrls:Identity"]!);

@@ -8,10 +8,10 @@
 
   <ItemGroup>
     <PackageReference Include="Grpc.Net.ClientFactory" Version="2.76.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.2" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2" />
-    <PackageReference Include="Scalar.AspNetCore.Microsoft" Version="2.12.7" />
-    <PackageReference Include="TICinema.Contracts" Version="1.0.10" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.5" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.5" />
+    <PackageReference Include="Scalar.AspNetCore.Microsoft" Version="2.13.19" />
+    <PackageReference Include="TICinema.Contracts" Version="1.0.12" />
   </ItemGroup>
 
 </Project>
