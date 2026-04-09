@@ -10,8 +10,9 @@
     <PackageReference Include="Grpc.Net.ClientFactory" Version="2.76.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.5" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.5" />
-    <PackageReference Include="Scalar.AspNetCore.Microsoft" Version="2.13.19" />
-    <PackageReference Include="TICinema.Contracts" Version="1.0.12" />
+    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />
+    <PackageReference Include="Scalar.AspNetCore.Microsoft" Version="2.13.20" />
+    <PackageReference Include="TICinema.Contracts" Version="1.0.16" />
   </ItemGroup>
 
 </Project>

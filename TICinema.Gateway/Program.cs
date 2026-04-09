@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Prometheus;
 using Scalar.AspNetCore;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using TICinema.Contracts.Protos.Identity;
+using TICinema.Contracts.Protos.Users;
 using TICinema.Gateway.Interfaces;
 using TICinema.Gateway.Middleware;
 using TICinema.Gateway.Services;
@@ -35,6 +37,12 @@ builder.Services.AddCors(options =>
               .AllowAnyMethod()
               .AllowCredentials();
     });
+});
+
+// 2. Регистрируем gRPC клиент для User Service
+builder.Services.AddGrpcClient<UsersService.UsersServiceClient>(o =>
+{
+    o.Address = new Uri(builder.Configuration["GrpcSettings:UsersServiceUrl"]!);
 });
 
 // 1. Получаем настройки
@@ -70,9 +78,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization(); // Добавляем Авторизацию
+builder.Services.AddAuthorization();
+
 
 var app = builder.Build();
+
+app.UseRouting();
+
+app.UseHttpMetrics();
+
 
 app.UseMiddleware<GrpcExceptionMiddleware>();
 app.UseCors("AllowFrontend");
@@ -86,6 +100,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.UseMetricServer();
 app.MapControllers();
 
 app.Run();
