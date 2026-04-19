@@ -4,11 +4,18 @@ using Prometheus;
 using Scalar.AspNetCore;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using TICinema.Contracts.Protos.Category;
 using TICinema.Contracts.Protos.Identity;
 using TICinema.Contracts.Protos.Users;
 using TICinema.Gateway.Interfaces;
 using TICinema.Gateway.Middleware;
 using TICinema.Gateway.Services;
+using TICinema.Contracts.Protos.Media;
+using TICinema.Contracts.Protos.Movie;
+using TICinema.Contracts.Protos.Theater;
+using TICinema.Gateway.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,18 +23,10 @@ builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
 builder.Services.AddScoped<IIdentityService, IdentityService>();
+builder.Services.AddScoped<IMediaGatewayService, MediaGatewayService>();
 
-builder.Services.AddGrpcClient<AuthService.AuthServiceClient>(o =>
-{
-    o.Address = new Uri(builder.Configuration["ServiceUrls:Identity"]!);
-});
+builder.Services.AddGrpcClients(builder.Configuration);
 
-builder.Services.AddGrpcClient<AccountService.AccountServiceClient>(options =>
-{
-    options.Address = new Uri(builder.Configuration["ServiceUrls:Identity"]!);
-});
-
-// Настройка CORS (оставляем как было)
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -39,20 +38,20 @@ builder.Services.AddCors(options =>
     });
 });
 
-// 2. Регистрируем gRPC клиент для User Service
-builder.Services.AddGrpcClient<UsersService.UsersServiceClient>(o =>
-{
-    o.Address = new Uri(builder.Configuration["GrpcSettings:UsersServiceUrl"]!);
-});
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("Gateaway-Service"))
+        .AddAspNetCoreInstrumentation()
+        .AddGrpcClientInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddRedisInstrumentation()
+        .AddOtlpExporter(options => options.Endpoint = new Uri("http://jaeger:4317")));
 
-// 1. Получаем настройки
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
 var secretKey = jwtSettings["Secret"];
 
-// Это заставит .NET не переименовывать claim-ы из JWT
 JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
 
-// 2. Добавляем Аутентификацию (Authentication)
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -80,13 +79,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
-
 var app = builder.Build();
 
 app.UseRouting();
-
-app.UseHttpMetrics();
-
 
 app.UseMiddleware<GrpcExceptionMiddleware>();
 app.UseCors("AllowFrontend");
@@ -94,9 +89,11 @@ app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
 
-if (app.Environment.IsDevelopment())
+app.UseHttpMetrics();
+
+if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Docker"))
 {
-    app.MapScalarApiReference();
+    app.MapScalarApiReference(); 
     app.MapOpenApi();
 }
 
